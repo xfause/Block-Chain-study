@@ -25,7 +25,7 @@ class blockchain(object):
         # 使得它与前一个区块的 proof 拼接成的字符串的 Hash 值
         # 以 4 个零开头。
         proof = 0
-        while self.valid_proof(last_proof,proof) if False:
+        while self.valid_proof(last_proof,proof) is False:
             proof += 1
         return proof
 
