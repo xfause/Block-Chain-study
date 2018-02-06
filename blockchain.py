@@ -1,7 +1,10 @@
 import hashlib
 import json
 from time import time
+from textwrap import dedent
 from uuid import uuid4
+from flask import Flask
+from flask import jsonify,request
 
 # block = {
 #     'index': 1,
@@ -17,7 +20,7 @@ from uuid import uuid4
 #     'previous_hash': "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 # }
 
-class blockchain(object):
+class Blockchain(object):
 
     def proof_of_work(self,last_proof):
 
@@ -50,9 +53,9 @@ class blockchain(object):
         block = {
             'index' : len(self.chain) +1,
             'timestamp': time(),
-            'transactions': self.current_transcations,
+            'transcations': self.current_transcations,
             'proof': proof,
-            'previoous_hash':previous_hash or self.hash(self.chain[-1]),
+            'previous_hash':previous_hash or self.hash(self.chain[-1]),
         }
 
         self.current_transcations = []
@@ -83,3 +86,73 @@ class blockchain(object):
     def last_block(self):
         return self.chain[-1]
 
+
+# /transactions/new 
+# /mine 
+# /chain return whole chain
+app = Flask(__name__)
+
+node_identifier = str(uuid4()).replace('-','')
+
+blockchain = Blockchain()
+
+@app.route('/mine',methods=['GET'])
+def mine():
+
+    # run proof of work algorithm waste time
+    last_block = blockchain.last_block
+    last_proof = last_block['proof']
+    proof = blockchain.proof_of_work(last_proof)
+
+    # give 1 coin to miner
+    # node_identifier is a random uuid in line 95
+    blockchain.new_transcations(
+        sender = '0',
+        recipient = node_identifier,
+        amount = 1,
+    )
+
+    # add new block in chain
+    previous_hash = blockchain.hash(last_block)
+    block = blockchain.new_block(proof,previous_hash)
+
+    response = {
+        'message' : 'New Block Forged',
+        'index' : block['index'],
+        'transcations' : block['transcations'],
+        'proof' : block['proof'],
+        'previous_hash' : block['previous_hash'],
+    }
+    return jsonify(response),200
+
+
+@app.route('/transcations/new',methods=['POST'])
+def new_transcation():
+    # {
+    #  "sender": "my address",
+    #  "recipient": "someone else's address",
+    #  "amount": 5
+    # }
+    values = request.get_json()
+
+    # check required fields are in post data
+    required = ['sender','recipient','amount']
+    if not all (k in values for k in required):
+        return 'Missing values',400
+
+    index = blockchain.new_transcations(values['sender'],values['recipient'],values['amount'])
+    response = {'message':'Transaction will add to Block'+str(index)}
+    return jsonify(response),201
+
+
+@app.route('/chain',methods=['GET'])
+def full_chain():
+
+    response = {
+        'chain': blockchain.chain,
+        'length': len(blockchain.chain),
+    }
+    return jsonify(response),200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0',port=5000)
