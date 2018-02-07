@@ -5,6 +5,8 @@ from textwrap import dedent
 from uuid import uuid4
 from flask import Flask
 from flask import jsonify,request
+from urllib.parse import urlparse
+import requests
 
 # block = {
 #     'index': 1,
@@ -44,9 +46,15 @@ class Blockchain(object):
 
         self.chain = []
         self.current_transcations = []
+        self.nodes = set()
 
         # create first block
         self.new_block(previous_hash=1,proof=100)
+
+    def register_node(self, address):
+        # add a new node to the list of nodes
+        parsed_url = urlparse(address)
+        self.nodes.add(parsed_url.netloc)
 
     def new_block(self,previous_hash,proof):
         
@@ -85,6 +93,58 @@ class Blockchain(object):
     @property
     def last_block(self):
         return self.chain[-1]
+
+    # check a chain is valid
+    def valid_chain(self,chain):
+
+        last_block = chain[0]
+        current_index = 1
+
+        while current_index < len(chain):
+            block = chain[current_index]
+            print('last_block : ' + str(last_block))
+            print('block : '+ str(block))
+            print('\n------------\n')
+
+            # check hash of block is correct
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+            
+            # check proof of work is correct
+            if not self.valid_proof(last_block['proof'], block['proof']):
+                return False
+
+            last_block = block
+            current_index += 1
+
+        return True
+
+    # resolve diff
+    def resolve_conflicts(self):
+
+        #replac chain with the longest one in the network.
+        neighbours = self.nodes
+        new_chain = None
+
+        max_len = len(self.chain)
+
+        for node in neighbours:
+            url = 'http://' + node + '/chain'
+            response = requests.get(url)
+            
+            if response.status_code == 200 :
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                if length > max_len and self.valid_chain(chain):
+                    max_len = length
+                    new_chain = chain
+
+        if new_chain:
+            self.chain = new_chain
+            return True
+        
+        return False
 
 
 # /transactions/new 
@@ -141,7 +201,7 @@ def new_transcation():
         return 'Missing values',400
 
     index = blockchain.new_transcations(values['sender'],values['recipient'],values['amount'])
-    response = {'message':'Transaction will add to Block'+str(index)}
+    response = {'message':'Transaction will add to Block '+str(index)}
     return jsonify(response),201
 
 
@@ -152,6 +212,41 @@ def full_chain():
         'chain': blockchain.chain,
         'length': len(blockchain.chain),
     }
+    return jsonify(response),200
+
+@app.route('/node/register', methods=['POST'])
+def register_node():
+
+    values = request.get_json()
+    nodes = values.get('nodes')
+
+    if nodes is None:
+        return 'Error: Please supply a valid list of nodes',400
+
+    for node in nodes:
+        blockchain.register_node(node)
+    
+    response = {
+        'message' : 'New nodes have been added',
+        'total_nodes' : list(blockchain.nodes),
+    }
+    return jsonify(response),201
+
+@app.route('/nodes/resolve',methods=['GET'])
+def consensus():
+
+    replaced = blockchain.resolve_conflicts()
+
+    if replaced:
+        response = {
+            'message' : 'Our chain was replaced',
+            'new_chain' : blockchain.chain
+        }
+    else:
+        response = {
+            'message' : 'Our chain is authoritative',
+            'chain' : blockchain.chain
+        }
     return jsonify(response),200
 
 if __name__ == '__main__':
