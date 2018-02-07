@@ -24,20 +24,23 @@ import requests
 
 class Blockchain(object):
 
-    def proof_of_work(self,last_proof):
+    def proof_of_work(self,last_block):
 
         # 找到一个数字 P 
         # 使得它与前一个区块的 proof 拼接成的字符串的 Hash 值
         # 以 4 个零开头。
+        last_proof = last_block['proof']
+        last_hash = self.hash(last_block)
+
         proof = 0
-        while self.valid_proof(last_proof,proof) is False:
+        while self.valid_proof(last_proof,proof,last_hash) is False:
             proof += 1
         return proof
 
     @staticmethod
-    def valid_proof(last_proof,proof):
+    def valid_proof(last_proof,proof,last_hash):
 
-        guess_string = str(last_proof) + str(proof)
+        guess_string = str(last_proof) + str(proof) + str(last_hash)
         guess =guess_string.encode()
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
@@ -54,7 +57,13 @@ class Blockchain(object):
     def register_node(self, address):
         # add a new node to the list of nodes
         parsed_url = urlparse(address)
-        self.nodes.add(parsed_url.netloc)
+        if parsed_url.netloc:
+            self.nodes.add(parsed_url.netloc)
+        elif parsed_url.path:
+            # Accepts an URL without scheme like '192.168.0.5:5000'.
+            self.nodes.add(parsed_url.path)
+        else:
+            raise ValueError('Invalid URL')
 
     def new_block(self,previous_hash,proof):
         
@@ -108,10 +117,12 @@ class Blockchain(object):
 
             # check hash of block is correct
             if block['previous_hash'] != self.hash(last_block):
+                print('Hash Error')
                 return False
             
             # check proof of work is correct
-            if not self.valid_proof(last_block['proof'], block['proof']):
+            if not self.valid_proof(last_block['proof'], block['proof'], last_block['previous_hash']):
+                print('Proof Error')
                 return False
 
             last_block = block
@@ -161,8 +172,7 @@ def mine():
 
     # run proof of work algorithm waste time
     last_block = blockchain.last_block
-    last_proof = last_block['proof']
-    proof = blockchain.proof_of_work(last_proof)
+    proof = blockchain.proof_of_work(last_block)
 
     # give 1 coin to miner
     # node_identifier is a random uuid in line 95
@@ -214,7 +224,7 @@ def full_chain():
     }
     return jsonify(response),200
 
-@app.route('/node/register', methods=['POST'])
+@app.route('/nodes/register', methods=['POST'])
 def register_node():
 
     values = request.get_json()
@@ -250,4 +260,11 @@ def consensus():
     return jsonify(response),200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0',port=5000)
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument('-p', '--port', default=5000, type=int, help='port to listen on')
+    args = parser.parse_args()
+    port = args.port
+
+    app.run(host='0.0.0.0', port=port)
